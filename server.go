@@ -24,6 +24,7 @@ type GetSshServerConfig func(ctx context.Context) *ssh.ServerConfig
 type Server struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
+	once     sync.Once // once cancel
 	connWG   sync.WaitGroup
 	listener net.Listener
 
@@ -63,8 +64,7 @@ func NewServer(fn GetSshServerConfig, handler Handler, options ...Option) *Serve
 const maxStackInfoSize = 64 << 10
 
 var (
-	ErrNotImplementSSConfig = errors.New("sshd: not implements GetSshServerConfig method")
-	ErrServerClosed         = errors.New("sshd: server closed")
+	ErrServerClosed = errors.New("sshd: server closed")
 )
 
 // ListenAndServe 监听 TCP 连接, 如果 addr 为空字符串则监听地址为 ":2222"
@@ -76,7 +76,7 @@ func (srv *Server) ListenAndServe(addr string) error {
 
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		srv.cancel()
+		srv.onceCancel()
 		return err
 	}
 
@@ -85,10 +85,10 @@ func (srv *Server) ListenAndServe(addr string) error {
 
 func (srv *Server) Serve(ln net.Listener) error {
 	srv.setDefaults()
-	defer srv.cancel()
+	defer srv.onceCancel()
 
 	if srv.GetSshServerConfig == nil {
-		return ErrNotImplementSSConfig
+		srv.GetSshServerConfig = GetDefaultSshServerConfig
 	}
 	if srv.Handler == nil {
 		srv.Handler = DefaultServeMux
@@ -186,10 +186,16 @@ func (srv *Server) setDefaults() {
 	}
 }
 
+func (srv *Server) onceCancel() {
+	srv.once.Do(func() {
+		srv.cancel()
+	})
+}
+
 // Shutdown 入参的 context, 如果非空则可用于优雅关闭
 func (srv *Server) Shutdown(ctx context.Context) error {
 	srv.setDefaults()
-	srv.cancel()
+	srv.onceCancel()
 	if ctx == nil || ctx.Done() == nil {
 		return srv.listener.Close()
 	}

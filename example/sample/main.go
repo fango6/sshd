@@ -8,10 +8,6 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-var noAuthSSConf = &ssh.ServerConfig{
-	NoClientAuth: true,
-}
-
 func main() {
 	mux := sshd.NewServeMux()
 	mux.HandleFunc("session", func(ctx context.Context, conn *ssh.ServerConn, newChannel ssh.NewChannel) error {
@@ -19,12 +15,10 @@ func main() {
 		return conn.Close()
 	})
 
-	if err := sshd.ListenAndServe(":56789", getSshServerConfig, mux); err != nil {
+	// clients are allowed to connect without authenticating.
+	sshd.DefaultSshServerConfig.NoClientAuth = true
+	if err := sshd.ListenAndServe(":56789", sshd.GetDefaultSshServerConfig, mux); err != nil {
 		log.Println("serve error:", err)
 	}
 	log.Println("sshd exited")
-}
-
-func getSshServerConfig(ctx context.Context) *ssh.ServerConfig {
-	return noAuthSSConf
 }
