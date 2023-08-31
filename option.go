@@ -4,6 +4,9 @@ import (
 	"log"
 )
 
+// Option 创建 Server 的可选类型
+type Option func(srv *Server)
+
 func WithProxyProtocol(enable bool) Option {
 	return func(srv *Server) {
 		srv.ProxyProtocol = enable
@@ -19,15 +22,6 @@ func WithConnContext(fn ConnContext) Option {
 func WithGetSshServerConfig(fn GetSshServerConfig) Option {
 	return func(srv *Server) {
 		srv.GetSshServerConfig = fn
-	}
-}
-
-func WithChannelHandler(chanType string, handler ChannelHandler) Option {
-	return func(srv *Server) {
-		if srv.ChannelHandlers == nil {
-			srv.ChannelHandlers = make(map[string]ChannelHandler)
-		}
-		srv.ChannelHandlers[chanType] = handler
 	}
 }
 

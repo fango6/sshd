@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"log"
-	"net"
 
 	"github.com/fango6/sshd"
 	"golang.org/x/crypto/ssh"
@@ -14,20 +13,16 @@ var noAuthSSConf = &ssh.ServerConfig{
 }
 
 func main() {
-	srv := sshd.NewServer(
-		getSshServerConfig,
-		nil,
-		sshd.WithChannelHandler("session", func(ctx context.Context, tcpConn net.Conn, sshConn *ssh.ServerConn, newChannel ssh.NewChannel) {
-			log.Printf("recv %s connection\n", tcpConn.RemoteAddr())
-			if err := sshConn.Close(); err != nil {
-				_ = err
-			}
-		}),
-	)
+	mux := sshd.NewServeMux()
+	mux.HandleFunc("session", func(ctx context.Context, conn *ssh.ServerConn, newChannel ssh.NewChannel) error {
+		log.Printf("recv %s connection\n", conn.RemoteAddr())
+		return conn.Close()
+	})
 
-	if err := srv.ListenAndServe(":56789"); err != nil {
+	if err := sshd.ListenAndServe(":56789", getSshServerConfig, mux); err != nil {
 		log.Println("serve error:", err)
 	}
+	log.Println("sshd exited")
 }
 
 func getSshServerConfig(ctx context.Context) *ssh.ServerConfig {

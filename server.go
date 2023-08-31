@@ -8,20 +8,16 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/fango6/proxyproto"
 	"golang.org/x/crypto/ssh"
-)
 
-type Option func(srv *Server)
+	"github.com/fango6/proxyproto"
+)
 
 // ConnContext 为 TCP 连接创建 context, 如在 context 中注入 uuid 等.
 type ConnContext func(conn net.Conn) context.Context
 
 // GetSshServerConfig 获取 *ssh.ServerConfig 实例的函数, 将在 ssh 握手前调用.
 type GetSshServerConfig func(ctx context.Context) *ssh.ServerConfig
-
-// ChannelHandler 每种 channel 类型的处理函数
-type ChannelHandler func(ctx context.Context, tcpConn net.Conn, sshConn *ssh.ServerConn, newChannel ssh.NewChannel)
 
 // Server 支持为每一个 TCP 连接创建独立的 context, 确保在多次认证情况下 context 唯一.
 // 支持 PROXY protocol, 并能够在处理 Channel 的请求时获取到 PROXY protocol 源数据.
@@ -42,27 +38,24 @@ type Server struct {
 	// 入参的 context 来源于 ConnContext.
 	GetSshServerConfig GetSshServerConfig
 
-	// ChannelHandlers 不同 channel 类型的 handler
-	ChannelHandlers map[string]ChannelHandler
+	// Handler 建立 ssh channel 时调用 Handler.ServeChannel.
+	// 默认为 DefaultServeMux, 不会处理任何类型的 channel.
+	Handler Handler
 
 	// ErrLogger 输出捕获到的错误日志, 默认为 log.Default
 	ErrLogger *log.Logger
 }
 
-func NewServer(fn GetSshServerConfig, handlers map[string]ChannelHandler, options ...Option) *Server {
+func NewServer(fn GetSshServerConfig, handler Handler, options ...Option) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	var srv = &Server{
 		ctx:                ctx,
 		cancel:             cancel,
 		GetSshServerConfig: fn,
-		ChannelHandlers:    handlers,
+		Handler:            handler,
 	}
 	for _, opt := range options {
 		opt(srv)
-	}
-
-	if srv.ChannelHandlers == nil {
-		srv.ChannelHandlers = make(map[string]ChannelHandler)
 	}
 	return srv
 }
@@ -70,9 +63,8 @@ func NewServer(fn GetSshServerConfig, handlers map[string]ChannelHandler, option
 const maxStackInfoSize = 64 << 10
 
 var (
-	ErrNotImplementSSConfig    = errors.New("sshd: not implements GetSshServerConfig method")
-	ErrNotImplementChanHandler = errors.New("sshd: not implements anyone ChannelHandler")
-	ErrServerClosed            = errors.New("sshd: server closed")
+	ErrNotImplementSSConfig = errors.New("sshd: not implements GetSshServerConfig method")
+	ErrServerClosed         = errors.New("sshd: server closed")
 )
 
 // ListenAndServe 监听 TCP 连接, 如果 addr 为空字符串则监听地址为 ":2222"
@@ -98,8 +90,8 @@ func (srv *Server) Serve(ln net.Listener) error {
 	if srv.GetSshServerConfig == nil {
 		return ErrNotImplementSSConfig
 	}
-	if len(srv.ChannelHandlers) == 0 {
-		return ErrNotImplementChanHandler
+	if srv.Handler == nil {
+		srv.Handler = DefaultServeMux
 	}
 
 	if srv.ProxyProtocol {
@@ -154,7 +146,7 @@ func (srv *Server) handshake(conn net.Conn) {
 	// handle channels and requests
 	go ssh.DiscardRequests(reqs)
 	for newChannel := range newChannels {
-		go srv.serveChannel(connCtx, conn, sshConn, newChannel)
+		go srv.serveChannel(connCtx, sshConn, newChannel)
 	}
 
 	// close tcp connection
@@ -163,25 +155,20 @@ func (srv *Server) handshake(conn net.Conn) {
 	}
 }
 
-func (srv *Server) serveChannel(ctx context.Context, tcpConn net.Conn, sshConn *ssh.ServerConn, newChan ssh.NewChannel) {
+func (srv *Server) serveChannel(ctx context.Context, conn *ssh.ServerConn, newChannel ssh.NewChannel) {
 	defer func() {
 		if r := recover(); r != nil {
 			buf := make([]byte, maxStackInfoSize)
 			buf = buf[:runtime.Stack(buf, false)]
-			srv.logf("sshd: panic serving %s: %v\n%s", tcpConn.RemoteAddr(), r, buf)
+			srv.logf("sshd: panic serving %s: %v\n%s", conn.RemoteAddr(), r, buf)
 		}
 	}()
 
-	chanType := newChan.ChannelType()
-	handler, ok := srv.ChannelHandlers[chanType]
-	if ok && handler != nil {
-		handler(ctx, tcpConn, sshConn, newChan)
-		return
+	if srv.Handler != nil {
+		srv.Handler = DefaultServeMux
 	}
-	srv.logf("sshd: reject %s the %s channel creation request\n", tcpConn.RemoteAddr(), chanType)
-
-	if err := newChan.Reject(ssh.UnknownChannelType, "unsupported channel type"); err != nil {
-		srv.logf("sshd: reply to reject error:%v", err)
+	if err := srv.Handler.ServeChannel(ctx, conn, newChannel); err != nil {
+		srv.logf("sshd: serving %s the channel error: %v\n", conn.RemoteAddr(), err)
 	}
 }
 
