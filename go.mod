@@ -3,7 +3,8 @@ module github.com/fango6/sshd
 go 1.19
 
 require (
-	github.com/fango6/proxyproto v1.0.1
+	github.com/fango6/proxyproto v1.0.2
+	github.com/google/uuid v1.3.1
 	golang.org/x/crypto v0.12.0
 )
 
