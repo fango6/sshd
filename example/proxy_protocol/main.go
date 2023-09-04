@@ -18,7 +18,7 @@ func main() {
 		return conn.Close()
 	})
 
-	// injects uuid in everyone connection
+	// injects uuid in every connection's context
 	connContextOption := sshd.WithConnContext(func(conn net.Conn) context.Context {
 		var ctx = context.WithValue(context.Background(), "uuid", uuid.NewString())
 
@@ -27,8 +27,18 @@ func main() {
 		}
 		return ctx
 	})
-	// clients are allowed to connect without authenticating.
-	sshd.DefaultSshServerConfig.NoClientAuth = true
+
+	sshd.PublicKeyAuth(func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+		fingerprint := ssh.FingerprintSHA256(key)
+		log.Printf("remote %s@%s, fingerprint %s", conn.User(), conn.RemoteAddr(), fingerprint)
+
+		return &ssh.Permissions{
+			Extensions: map[string]string{
+				"fingerprint": fingerprint,
+			},
+		}, nil
+	})
+
 	if err := sshd.ListenAndServe(":56789", sshd.GetDefaultSshServerConfig, mux,
 		sshd.WithProxyProtocol(true), connContextOption); err != nil {
 		log.Println("serve error:", err)
