@@ -7,6 +7,7 @@ import (
 	"net"
 	"runtime"
 	"sync"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 
@@ -42,6 +43,13 @@ type Server struct {
 	// Handler 建立 ssh channel 时调用 Handler.ServeChannel.
 	// 默认为 DefaultServeMux, 不会处理任何类型的 channel.
 	Handler Handler
+
+	// ReadTimeout 读超时时间, 在读取数据时重置读超时
+	ReadTimeout time.Duration
+	// WriteTimeout 写超时时间, 在写入数据时重置写超时
+	WriteTimeout time.Duration
+	// IdleTimeout 连接空闲时间, 默认为 30m, 在关闭 tcp 连接时设置读写超时
+	IdleTimeout time.Duration
 
 	// ErrLogger 输出捕获到的错误日志, 默认为 log.Default
 	ErrLogger *log.Logger
@@ -134,10 +142,16 @@ func (srv *Server) handshake(conn net.Conn) {
 	if connCtx == nil {
 		connCtx = context.Background()
 	}
+	newConn := &Conn{
+		Conn:         conn,
+		readTimeout:  srv.ReadTimeout,
+		writeTimeout: srv.WriteTimeout,
+		idleTimeout:  srv.IdleTimeout,
+	}
 
 	// ssh handshake
 	ssConf := srv.GetSshServerConfig(connCtx)
-	sshConn, newChannels, reqs, err := ssh.NewServerConn(conn, ssConf)
+	sshConn, newChannels, reqs, err := ssh.NewServerConn(newConn, ssConf)
 	if err != nil {
 		srv.logf("sshd: handshake with %s error:%v", conn.RemoteAddr(), err)
 		return

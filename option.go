@@ -2,6 +2,7 @@ package sshd
 
 import (
 	"log"
+	"time"
 )
 
 // Option 创建 Server 的可选类型
@@ -40,5 +41,23 @@ func WithHandlerFunc(h HandlerFunc) Option {
 func WithErrLogger(logger *log.Logger) Option {
 	return func(srv *Server) {
 		srv.ErrLogger = logger
+	}
+}
+
+func WithReadTimeout(duration time.Duration) Option {
+	return func(srv *Server) {
+		srv.ReadTimeout = duration
+	}
+}
+
+func WithWriteTimeout(duration time.Duration) Option {
+	return func(srv *Server) {
+		srv.WriteTimeout = duration
+	}
+}
+
+func WithIdleTimeout(duration time.Duration) Option {
+	return func(srv *Server) {
+		srv.IdleTimeout = duration
 	}
 }
