@@ -27,14 +27,7 @@ func ReplaceDefaultSshServerConfig(conf *ssh.ServerConfig) (original *ssh.Server
 // NewDefaultSshServerConfig 创建一个默认的 ssh.ServerConfig.
 // Host key 类型为 rsa, bit size 为 3072.
 //
-// Cipher 算法集为: aes128-gcm@openssh.com, aes256-gcm@openssh.com,
-// chacha20-poly1305@openssh.com, aes128-ctr, aes192-ctr, aes256-ctr
-//
-// KEX (key exchange) 算法集为 curve25519-sha256, curve25519-sha256@libssh.org,
-// ecdh-sha2-nistp256, ecdh-sha2-nistp384, ecdh-sha2-nistp521, diffie-hellman-group14-sha256
-//
-// MAC (Message Authentication Code) 算法集为 hmac-sha2-256-etm@openssh.com,
-// hmac-sha2-512-etm@openssh.com, hmac-sha2-256, hmac-sha2-512
+// 算法集与 golang.org/x/crypto/ssh 对应
 func NewDefaultSshServerConfig() *ssh.ServerConfig {
 	const maxRetriedTimes = 5
 	var hk ssh.Signer
@@ -42,7 +35,7 @@ func NewDefaultSshServerConfig() *ssh.ServerConfig {
 
 	for i := 0; i < maxRetriedTimes; i++ {
 		hk, err = generateSigner()
-		if err == nil {
+		if err == nil && hk != nil {
 			break
 		}
 	}
@@ -50,23 +43,7 @@ func NewDefaultSshServerConfig() *ssh.ServerConfig {
 		panic("sshd: failed to generate signer")
 	}
 
-	conf := &ssh.ServerConfig{
-		Config: ssh.Config{
-			KeyExchanges: []string{
-				"curve25519-sha256", "curve25519-sha256@libssh.org",
-				"ecdh-sha2-nistp256", "ecdh-sha2-nistp384", "ecdh-sha2-nistp521",
-				"diffie-hellman-group14-sha256",
-			},
-			Ciphers: []string{
-				"aes128-gcm@openssh.com", "aes256-gcm@openssh.com",
-				"chacha20-poly1305@openssh.com", "aes128-ctr", "aes192-ctr", "aes256-ctr",
-			},
-			MACs: []string{
-				"hmac-sha2-256-etm@openssh.com", "hmac-sha2-512-etm@openssh.com",
-				"hmac-sha2-256, hmac-sha2-512",
-			},
-		},
-	}
+	conf := &ssh.ServerConfig{}
 	conf.AddHostKey(hk)
 	conf.SetDefaults()
 	return conf
