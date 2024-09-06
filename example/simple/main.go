@@ -26,7 +26,7 @@ func main() {
 		}, nil
 	})
 
-	if err := sshd.ListenAndServe(":56789", sshd.GetDefaultSshServerConfig, mux); err != nil {
+	if err := sshd.ListenAndServe(":56789", mux); err != nil {
 		log.Println("serve error:", err)
 	}
 	log.Println("sshd exited")

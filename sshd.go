@@ -6,12 +6,12 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-func Serve(ln net.Listener, fn GetSshServerConfig, handler Handler, options ...Option) error {
-	return NewServer(fn, handler, options...).Serve(ln)
+func Serve(ln net.Listener, handler Handler, options ...Option) error {
+	return NewServer(handler, options...).Serve(ln)
 }
 
-func ListenAndServe(addr string, fn GetSshServerConfig, handler Handler, options ...Option) error {
-	srv := NewServer(fn, handler, options...)
+func ListenAndServe(addr string, handler Handler, options ...Option) error {
+	srv := NewServer(handler, options...)
 	return srv.ListenAndServe(addr)
 }
 

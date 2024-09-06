@@ -10,15 +10,18 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
-
-	"github.com/fango6/proxyproto"
 )
 
-// ConnContext 为 TCP 连接创建 context, 如在 context 中注入 uuid 等.
-type ConnContext func(conn net.Conn) context.Context
+type (
+	// ConnCallback 在接收 TCP 后, 对连接处理.
+	ConnCallback func(conn net.Conn) (newConn net.Conn)
 
-// GetSshServerConfig 获取 *ssh.ServerConfig 实例的函数, 将在 ssh 握手前调用.
-type GetSshServerConfig func(ctx context.Context) *ssh.ServerConfig
+	// ConnContext 为 TCP 连接创建 context, 如在 context 中注入 uuid 等.
+	ConnContext func(conn net.Conn) context.Context
+
+	// GetSshServerConfig 获取 *ssh.ServerConfig 实例的函数, 将在 ssh 握手前调用.
+	GetSshServerConfig func(ctx context.Context) *ssh.ServerConfig
+)
 
 // Server 支持为每一个 TCP 连接创建独立的 context, 确保在多次认证情况下 context 唯一.
 // 支持 PROXY protocol, 并能够在处理 Channel 的请求时获取到 PROXY protocol 源数据.
@@ -29,8 +32,8 @@ type Server struct {
 	connWG   sync.WaitGroup
 	listener net.Listener
 
-	// ProxyProtocol 如果开启, 将可以解析 PROXY header.
-	ProxyProtocol bool
+	// ConnCallback 在接收 TCP 后, 对连接处理, 如 PROXY protocol 等.
+	ConnCallback ConnCallback
 
 	// ConnContext 为 TCP 连接创建 context, 如在 context 中注入 uuid 等.
 	// 将在建立 TCP 连接之后调用.
@@ -55,13 +58,12 @@ type Server struct {
 	ErrLogger *log.Logger
 }
 
-func NewServer(fn GetSshServerConfig, handler Handler, options ...Option) *Server {
+func NewServer(handler Handler, options ...Option) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	var srv = &Server{
-		ctx:                ctx,
-		cancel:             cancel,
-		GetSshServerConfig: fn,
-		Handler:            handler,
+		ctx:     ctx,
+		cancel:  cancel,
+		Handler: handler,
 	}
 	for _, opt := range options {
 		opt(srv)
@@ -77,7 +79,6 @@ var (
 
 // ListenAndServe 监听 TCP 连接, 如果 addr 为空字符串则监听地址为 ":2222"
 func (srv *Server) ListenAndServe(addr string) error {
-	srv.setDefaults()
 	if len(addr) == 0 {
 		addr = ":2222"
 	}
@@ -95,16 +96,6 @@ func (srv *Server) Serve(ln net.Listener) error {
 	srv.setDefaults()
 	defer srv.onceCancel()
 
-	if srv.GetSshServerConfig == nil {
-		srv.GetSshServerConfig = GetDefaultSshServerConfig
-	}
-	if srv.Handler == nil {
-		srv.Handler = DefaultServeMux
-	}
-
-	if srv.ProxyProtocol {
-		ln = proxyproto.NewListener(ln)
-	}
 	srv.listener = ln
 
 	for {
@@ -130,17 +121,18 @@ func (srv *Server) handshake(conn net.Conn) {
 			buf := make([]byte, maxStackInfoSize)
 			buf = buf[:runtime.Stack(buf, false)]
 			srv.logf("sshd: panic serving %s: %v\n%s", conn.RemoteAddr(), r, buf)
+			conn.Close()
 		}
 		srv.connWG.Done()
 	}()
 
-	// spawn context for this connection
-	var connCtx context.Context
-	if srv.ConnContext != nil {
-		connCtx = srv.ConnContext(conn)
+	if srv.ConnCallback != nil {
+		conn = srv.ConnCallback(conn)
 	}
-	if connCtx == nil {
-		connCtx = context.Background()
+	// spawn context for this connection
+	var ctx = context.Background()
+	if srv.ConnContext != nil {
+		ctx = srv.ConnContext(conn)
 	}
 	newConn := &Conn{
 		Conn:         conn,
@@ -150,39 +142,23 @@ func (srv *Server) handshake(conn net.Conn) {
 	}
 
 	// ssh handshake
-	ssConf := srv.GetSshServerConfig(connCtx)
+	ssConf := srv.GetSshServerConfig(ctx)
 	sshConn, newChannels, reqs, err := ssh.NewServerConn(newConn, ssConf)
 	if err != nil {
 		srv.logf("sshd: handshake with %s error:%v", conn.RemoteAddr(), err)
 		return
 	}
+	defer newConn.Close()
 
 	// handle channels and requests
 	go ssh.DiscardRequests(reqs)
 	for newChannel := range newChannels {
-		go srv.serveChannel(connCtx, sshConn, newChannel)
-	}
-
-	// close tcp connection
-	if err := conn.Close(); err != nil {
-		_ = err
-	}
-}
-
-func (srv *Server) serveChannel(ctx context.Context, conn *ssh.ServerConn, newChannel ssh.NewChannel) {
-	defer func() {
-		if r := recover(); r != nil {
-			buf := make([]byte, maxStackInfoSize)
-			buf = buf[:runtime.Stack(buf, false)]
-			srv.logf("sshd: panic serving %s: %v\n%s", conn.RemoteAddr(), r, buf)
-		}
-	}()
-
-	if srv.Handler != nil {
-		srv.Handler = DefaultServeMux
-	}
-	if err := srv.Handler.ServeChannel(ctx, conn, newChannel); err != nil {
-		srv.logf("sshd: serving %s the channel error: %v\n", conn.RemoteAddr(), err)
+		go func(newChannel ssh.NewChannel) {
+			err := srv.Handler.ServeChannel(ctx, sshConn, newChannel)
+			if err != nil {
+				srv.logf("sshd: serving %s the channel error: %v\n", conn.RemoteAddr(), err)
+			}
+		}(newChannel)
 	}
 }
 
@@ -195,29 +171,46 @@ func (srv *Server) logf(format string, args ...interface{}) {
 }
 
 func (srv *Server) setDefaults() {
-	if srv.ctx == nil || srv.ctx.Done() == nil || srv.cancel == nil {
+	if srv.ctx == nil {
 		srv.ctx, srv.cancel = context.WithCancel(context.Background())
+	} else if srv.ctx.Done() == nil || srv.cancel == nil {
+		srv.ctx, srv.cancel = context.WithCancel(srv.ctx)
+	}
+
+	if srv.GetSshServerConfig == nil {
+		srv.GetSshServerConfig = GetDefaultSshServerConfig
+	}
+	if srv.Handler == nil {
+		srv.Handler = DefaultServeMux
 	}
 }
 
 func (srv *Server) onceCancel() {
 	srv.once.Do(func() {
-		srv.cancel()
+		if srv.cancel != nil {
+			srv.cancel()
+		}
 	})
 }
 
 // Shutdown 入参的 context, 如果非空则可用于优雅关闭
 func (srv *Server) Shutdown(ctx context.Context) error {
-	srv.setDefaults()
-	srv.onceCancel()
+	defer srv.onceCancel()
+
 	if ctx == nil || ctx.Done() == nil {
 		return srv.listener.Close()
 	}
+	<-ctx.Done()
 
 	// graceful shutdown
 	var done = make(chan error, 1)
 	go func() {
 		srv.connWG.Wait()
+
+		if srv.listener == nil {
+			done <- nil
+			return
+		}
 		done <- srv.listener.Close()
 	}()
 

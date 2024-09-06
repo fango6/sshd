@@ -39,8 +39,11 @@ func main() {
 		}, nil
 	})
 
-	if err := sshd.ListenAndServe(":56789", sshd.GetDefaultSshServerConfig, mux,
-		sshd.WithProxyProtocol(true), connContextOption); err != nil {
+	if err := sshd.ListenAndServe(":56789", mux,
+		sshd.WithConnCallback(func(conn net.Conn) (newConn net.Conn) {
+			return proxyproto.NewConn(conn)
+		}),
+		connContextOption); err != nil {
 		log.Println("serve error:", err)
 	}
 	log.Println("sshd exited")

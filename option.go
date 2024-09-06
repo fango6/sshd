@@ -8,9 +8,9 @@ import (
 // Option 创建 Server 的可选类型
 type Option func(srv *Server)
 
-func WithProxyProtocol(enable bool) Option {
+func WithConnCallback(fn ConnCallback) Option {
 	return func(srv *Server) {
-		srv.ProxyProtocol = enable
+		srv.ConnCallback = fn
 	}
 }
 

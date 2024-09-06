@@ -23,7 +23,7 @@ func main() {
 	})
 	// clients are allowed to connect without authenticating.
 	sshd.DefaultSshServerConfig.NoClientAuth = true
-	if err := sshd.ListenAndServe(":56789", sshd.GetDefaultSshServerConfig, mux, uuidOption); err != nil {
+	if err := sshd.ListenAndServe(":56789", mux, uuidOption); err != nil {
 		log.Println("serve error:", err)
 	}
 	log.Println("sshd exited")
