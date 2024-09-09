@@ -2,6 +2,9 @@ package sshd
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"os"
@@ -29,12 +32,11 @@ func ReplaceDefaultSshServerConfig(conf *ssh.ServerConfig) (original *ssh.Server
 //
 // 算法集与 golang.org/x/crypto/ssh 对应
 func NewDefaultSshServerConfig() *ssh.ServerConfig {
-	const maxRetriedTimes = 5
 	var hk ssh.Signer
 	var err error
 
-	for i := 0; i < maxRetriedTimes; i++ {
-		hk, err = generateSigner()
+	for i := 0; i < 5; i++ {
+		hk, err = GenerateEd25519HostKey()
 		if err == nil && hk != nil {
 			break
 		}
@@ -49,8 +51,24 @@ func NewDefaultSshServerConfig() *ssh.ServerConfig {
 	return conf
 }
 
-func generateSigner() (ssh.Signer, error) {
-	key, err := rsa.GenerateKey(rand.Reader, 3072)
+func GenerateEd25519HostKey() (ssh.Signer, error) {
+	_, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+	return ssh.NewSignerFromKey(key)
+}
+
+func GenerateRsaHostKey(bits int) (ssh.Signer, error) {
+	key, err := rsa.GenerateKey(rand.Reader, bits)
+	if err != nil {
+		return nil, err
+	}
+	return ssh.NewSignerFromKey(key)
+}
+
+func GenerateEcdsaHostKey(curve elliptic.Curve) (ssh.Signer, error) {
+	key, err := ecdsa.GenerateKey(curve, rand.Reader)
 	if err != nil {
 		return nil, err
 	}

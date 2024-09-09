@@ -153,12 +153,30 @@ func (srv *Server) handshake(conn net.Conn) {
 	// handle channels and requests
 	go ssh.DiscardRequests(reqs)
 	for newChannel := range newChannels {
-		go func(newChannel ssh.NewChannel) {
-			err := srv.Handler.ServeChannel(ctx, sshConn, newChannel)
-			if err != nil {
-				srv.logf("sshd: serving %s the channel error: %v\n", conn.RemoteAddr(), err)
-			}
-		}(newChannel)
+		go srv.handleNewChannel(ctx, ssConf, sshConn, newChannel)
+	}
+
+	// close tcp connection
+	if err := newConn.Close(); err != nil {
+		_ = err
+	}
+}
+
+func (srv *Server) handleNewChannel(ctx context.Context, conf *ssh.ServerConfig, conn *ssh.ServerConn, newChannel ssh.NewChannel) {
+	defer func() {
+		if r := recover(); r != nil {
+			buf := make([]byte, maxStackInfoSize)
+			buf = buf[:runtime.Stack(buf, false)]
+			srv.logf("sshd: panic serving %s: %v\n%s", conn.RemoteAddr(), r, buf)
+			conn.Close()
+		}
+	}()
+
+	chain := NewChannelChain(srv.Handler, conf)
+	err := chain.entry(ctx, conn, newChannel)
+	if err != nil {
+		srv.logf("sshd: serving %s the channel error: %v\n", conn.RemoteAddr(), err)
+		return
 	}
 }
 

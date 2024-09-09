@@ -12,7 +12,7 @@ import (
 
 func main() {
 	mux := sshd.NewServeMux()
-	mux.HandleFunc("session", func(ctx context.Context, conn *ssh.ServerConn, newChannel ssh.NewChannel) error {
+	mux.HandleFunc("session", func(cc *sshd.ChannelChain, conn *ssh.ServerConn, newChannel ssh.NewChannel) error {
 		log.Printf("recv %s connection\n", conn.RemoteAddr())
 		return conn.Close()
 	})

@@ -26,18 +26,6 @@ func WithGetSshServerConfig(fn GetSshServerConfig) Option {
 	}
 }
 
-func WithHandler(h Handler) Option {
-	return func(srv *Server) {
-		srv.Handler = h
-	}
-}
-
-func WithHandlerFunc(h HandlerFunc) Option {
-	return func(srv *Server) {
-		srv.Handler = HandlerFunc(h)
-	}
-}
-
 func WithErrLogger(logger *log.Logger) Option {
 	return func(srv *Server) {
 		srv.ErrLogger = logger

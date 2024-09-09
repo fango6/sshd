@@ -1,7 +1,6 @@
 package sshd
 
 import (
-	"context"
 	"sync"
 
 	"golang.org/x/crypto/ssh"
@@ -14,15 +13,15 @@ var DefaultServeMux = NewServeMux()
 type Handler interface {
 	// ServeChannel 对 ssh.NewChannel 处理, ctx 来源于 ConnContext,
 	// 如果返回的 error 不为 nil 将会在 Server 中输出日志.
-	ServeChannel(ctx context.Context, conn *ssh.ServerConn, newChannel ssh.NewChannel) error
+	ServeChannel(cc *ChannelChain, conn *ssh.ServerConn, newChannel ssh.NewChannel) error
 }
 
 // HandlerFunc 函数类型的 Handler
-type HandlerFunc func(ctx context.Context, conn *ssh.ServerConn, newChannel ssh.NewChannel) error
+type HandlerFunc func(cc *ChannelChain, conn *ssh.ServerConn, newChannel ssh.NewChannel) error
 
 // ServeChannel implements Handler.ServeChannel
-func (h HandlerFunc) ServeChannel(ctx context.Context, conn *ssh.ServerConn, newChannel ssh.NewChannel) error {
-	return h(ctx, conn, newChannel)
+func (h HandlerFunc) ServeChannel(cc *ChannelChain, conn *ssh.ServerConn, newChannel ssh.NewChannel) error {
+	return h(cc, conn, newChannel)
 }
 
 // ServeMux is an SSH request multiplexer.
@@ -61,7 +60,7 @@ func (mux *ServeMux) Handle(channelType string, handler Handler) {
 }
 
 // HandleFunc registers the handler function for the given channel type.
-func (mux *ServeMux) HandleFunc(channelType string, handler func(context.Context, *ssh.ServerConn, ssh.NewChannel) error) {
+func (mux *ServeMux) HandleFunc(channelType string, handler func(*ChannelChain, *ssh.ServerConn, ssh.NewChannel) error) {
 	if handler == nil {
 		panic("mux: nil handler")
 	}
@@ -69,14 +68,14 @@ func (mux *ServeMux) HandleFunc(channelType string, handler func(context.Context
 }
 
 // ServeChannel implements Handler
-func (mux *ServeMux) ServeChannel(ctx context.Context, conn *ssh.ServerConn, newChannel ssh.NewChannel) error {
+func (mux *ServeMux) ServeChannel(cc *ChannelChain, conn *ssh.ServerConn, newChannel ssh.NewChannel) error {
 	channelType := newChannel.ChannelType()
 	mux.mut.RLock()
 	handler, ok := mux.handlers[channelType]
 	mux.mut.RUnlock()
 
 	if ok && handler != nil {
-		return handler.ServeChannel(ctx, conn, newChannel)
+		return handler.ServeChannel(cc, conn, newChannel)
 	}
 	return newChannel.Reject(ssh.UnknownChannelType, "unsupported channel type")
 }
